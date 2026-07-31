@@ -1,0 +1,17 @@
+{
+  "name": "@moshcoder/moshpit-registry",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Client for the Moshpit registry — resolve names, read key pins, list endings. Cached, coalesced, bounded, and clear about which failures are answers.",
+  "keywords": ["moshpit", "registry", "namespace", "client"],
+  "repository": { "type": "git", "url": "git+https://github.com/moshcoder/moshpit-registry.git" },
+  "homepage": "https://github.com/moshcoder/moshpit-registry",
+  "main": "lib/index.mjs",
+  "exports": { ".": "./lib/index.mjs" },
+  "bin": { "moshpit-registry": "bin/moshpit-registry.mjs" },
+  "files": ["bin", "lib", "README.md", "LICENSE"],
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" }
+}
