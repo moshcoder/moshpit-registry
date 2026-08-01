@@ -5,7 +5,7 @@
 // with a shell in front, for when the question is "what does the registry
 // actually say" rather than "what did something do with the answer".
 
-import { createRegistry, DEFAULT_REGISTRY_BASE } from "../lib/index.mjs";
+import { createRegistry, DEFAULT_REGISTRY_BASE, DEFAULT_TIMEOUT_MS } from "../lib/index.mjs";
 
 const USAGE = `moshpit-registry — ask the Moshpit registry
 
@@ -14,16 +14,31 @@ const USAGE = `moshpit-registry — ask the Moshpit registry
   moshpit-registry tlds                  every ending claimed
 
   --registry URL    a self-hosted pit (default: ${DEFAULT_REGISTRY_BASE})
+  --timeout MS      request deadline in milliseconds (default: ${DEFAULT_TIMEOUT_MS})
   --json            raw JSON instead of a summary`;
 
 const args = process.argv.slice(2);
 const [sub, ...rest] = args;
 const flag = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
-const positional = rest.filter((a) => !a.startsWith("--") && a !== flag("registry", null));
+const valueFlags = new Set(["--registry", "--timeout"]);
+const positional = rest.filter((a, i) => !a.startsWith("--") && !valueFlags.has(rest[i - 1]));
 
 if (!sub || sub === "help" || sub === "--help") { console.log(USAGE); process.exit(sub ? 0 : 1); }
 
-const registry = createRegistry({ base: flag("registry", DEFAULT_REGISTRY_BASE) });
+const timeoutValue = flag("timeout", null);
+if (args.includes("--timeout") && (
+  !/^\d+$/.test(String(timeoutValue ?? ""))
+  || !Number.isSafeInteger(Number(timeoutValue))
+  || Number(timeoutValue) < 1
+)) {
+  console.error("moshpit-registry: --timeout must be a positive integer in milliseconds");
+  process.exit(1);
+}
+
+const registry = createRegistry({
+  base: flag("registry", DEFAULT_REGISTRY_BASE),
+  timeoutMs: timeoutValue === null ? DEFAULT_TIMEOUT_MS : Number(timeoutValue),
+});
 const raw = args.includes("--json");
 
 if (sub === "tlds") {
