@@ -9,7 +9,7 @@ import { createRegistry, DEFAULT_REGISTRY_BASE, DEFAULT_TIMEOUT_MS } from "../li
 
 const USAGE = `moshpit-registry — ask the Moshpit registry
 
-  moshpit-registry resolve <name>        where a name points, and who holds it
+  moshpit-registry resolve <name...>     where names point, and who holds them
   moshpit-registry pins <name> [kind]    the keys a name may present (tls | mtp)
   moshpit-registry tlds                  every ending claimed
 
@@ -51,15 +51,39 @@ const name = positional[0];
 if (!name) { console.error(`usage: moshpit-registry ${sub} <name>`); process.exit(1); }
 
 if (sub === "resolve") {
-  const r = await registry.resolve(name);
-  if (!r) { console.log(`${name} — the registry has no answer (unreachable, or not a Moshpit name)`); process.exit(1); }
-  if (raw) { console.log(JSON.stringify(r, null, 2)); process.exit(0); }
-  console.log(`${name}`);
-  console.log(`  ending held    ${r.registered ? "yes" : "no"}`);
-  console.log(`  name minted    ${r.name_registered ? "yes" : "no"}`);
-  console.log(`  points at      ${r.target ?? "nothing yet"}`);
-  if (r.resolved && r.resolved !== r.name) console.log(`  resolves to    ${r.resolved}  (aliased)`);
-  process.exit(0);
+  const results = await Promise.all(positional.map(async (requested) => ({
+    name: requested,
+    result: await registry.resolve(requested),
+  })));
+
+  // Preserve the established single-name failure text as well as its success
+  // shape. Structured per-name nulls are only part of the new batch format.
+  if (results.length === 1 && !results[0].result) {
+    console.log(`${results[0].name} — the registry has no answer (unreachable, or not a Moshpit name)`);
+    process.exit(1);
+  }
+
+  if (raw) {
+    // Keep the established single-name shape. Multiple names need their input
+    // beside each answer because a null result carries no name of its own.
+    console.log(JSON.stringify(results.length === 1 ? results[0].result : results, null, 2));
+  } else {
+    const sections = results.map(({ name: requested, result }) => {
+      if (!result) return `${requested} — the registry has no answer (unreachable, or not a Moshpit name)`;
+      const lines = [
+        requested,
+        `  ending held    ${result.registered ? "yes" : "no"}`,
+        `  name minted    ${result.name_registered ? "yes" : "no"}`,
+        `  points at      ${result.target ?? "nothing yet"}`,
+      ];
+      if (result.resolved && result.resolved !== result.name) {
+        lines.push(`  resolves to    ${result.resolved}  (aliased)`);
+      }
+      return lines.join("\n");
+    });
+    console.log(sections.join("\n\n"));
+  }
+  process.exit(results.some(({ result }) => !result) ? 1 : 0);
 }
 
 if (sub === "pins") {

@@ -75,3 +75,104 @@ test("CLI timeout aborts a slow self-hosted registry request", async (t) => {
   assert.match(requestedUrl, /name=blue\.eggs/);
   assert.ok(elapsed < 2000, `configured timeout took ${elapsed}ms`);
 });
+
+test("resolve accepts multiple names and preserves single-name JSON", async (t) => {
+  const requests = [];
+  const server = createServer((req, res) => {
+    const name = new URL(req.url, "http://127.0.0.1").searchParams.get("name");
+    requests.push(name);
+    res.setHeader("content-type", "application/json");
+    if (name === "missing.eggs") {
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    res.end(JSON.stringify({
+      name,
+      registered: true,
+      name_registered: true,
+      target: name === "blue.eggs" ? "203.0.113.9" : null,
+    }));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const registry = `http://127.0.0.1:${server.address().port}`;
+
+  const single = await runAsync(["resolve", "blue.eggs", "--registry", registry, "--json"]);
+  assert.equal(single.status, 0, single.stderr || single.stdout);
+  assert.deepEqual(JSON.parse(single.stdout), {
+    name: "blue.eggs",
+    registered: true,
+    name_registered: true,
+    target: "203.0.113.9",
+  });
+
+  const missing = await runAsync(["resolve", "missing.eggs", "--registry", registry, "--json"]);
+  assert.equal(missing.status, 1);
+  assert.equal(missing.stderr, "");
+  assert.equal(missing.stdout,
+    "missing.eggs — the registry has no answer (unreachable, or not a Moshpit name)\n");
+
+  requests.length = 0;
+  const multiple = await runAsync([
+    "resolve", "Blue.Eggs.", "missing.eggs", "blue.eggs",
+    "--registry", registry, "--json",
+  ]);
+  assert.equal(multiple.status, 1, multiple.stderr || multiple.stdout);
+  assert.equal(multiple.stderr, "");
+  assert.deepEqual(JSON.parse(multiple.stdout), [
+    {
+      name: "Blue.Eggs.",
+      result: {
+        name: "blue.eggs",
+        registered: true,
+        name_registered: true,
+        target: "203.0.113.9",
+      },
+    },
+    { name: "missing.eggs", result: null },
+    {
+      name: "blue.eggs",
+      result: {
+        name: "blue.eggs",
+        registered: true,
+        name_registered: true,
+        target: "203.0.113.9",
+      },
+    },
+  ]);
+  assert.deepEqual(requests.sort(), ["blue.eggs", "missing.eggs"],
+    "normalized duplicates should share one in-flight request");
+});
+
+test("multi-name human output keeps input order", async (t) => {
+  const server = createServer((req, res) => {
+    const name = new URL(req.url, "http://127.0.0.1").searchParams.get("name");
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      name,
+      registered: true,
+      name_registered: true,
+      target: name === "first.eggs" ? "203.0.113.1" : "203.0.113.2",
+    }));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const result = await runAsync([
+    "resolve", "first.eggs", "second.eggs",
+    "--registry", `http://127.0.0.1:${server.address().port}`,
+  ]);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(result.stderr, "");
+  assert.ok(result.stdout.indexOf("first.eggs") < result.stdout.indexOf("second.eggs"));
+  assert.match(result.stdout, /first\.eggs[\s\S]*points at\s+203\.0\.113\.1/);
+  assert.match(result.stdout, /second\.eggs[\s\S]*points at\s+203\.0\.113\.2/);
+});
