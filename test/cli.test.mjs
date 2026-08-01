@@ -110,6 +110,12 @@ test("resolve accepts multiple names and preserves single-name JSON", async (t) 
     target: "203.0.113.9",
   });
 
+  const missing = await runAsync(["resolve", "missing.eggs", "--registry", registry, "--json"]);
+  assert.equal(missing.status, 1);
+  assert.equal(missing.stderr, "");
+  assert.equal(missing.stdout,
+    "missing.eggs — the registry has no answer (unreachable, or not a Moshpit name)\n");
+
   requests.length = 0;
   const multiple = await runAsync([
     "resolve", "Blue.Eggs.", "missing.eggs", "blue.eggs",

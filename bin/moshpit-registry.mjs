@@ -56,6 +56,13 @@ if (sub === "resolve") {
     result: await registry.resolve(requested),
   })));
 
+  // Preserve the established single-name failure text as well as its success
+  // shape. Structured per-name nulls are only part of the new batch format.
+  if (results.length === 1 && !results[0].result) {
+    console.log(`${results[0].name} — the registry has no answer (unreachable, or not a Moshpit name)`);
+    process.exit(1);
+  }
+
   if (raw) {
     // Keep the established single-name shape. Multiple names need their input
     // beside each answer because a null result carries no name of its own.
