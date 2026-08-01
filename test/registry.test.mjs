@@ -48,6 +48,30 @@ test("simultaneous lookups coalesce into one request", async () => {
   assert.equal(calls, 1, "a client retrying a lost query must not become two requests");
 });
 
+test("clear keeps an old request from replacing a newer in-flight lookup", async () => {
+  const releases = [];
+  let calls = 0;
+  const impl = async () => {
+    const call = calls++;
+    await new Promise((resolve) => { releases[call] = resolve; });
+    return { ok: true, status: 200, json: async () => ({ call }) };
+  };
+
+  const registry = createRegistry({ fetchImpl: impl });
+  const first = registry.resolve("a.eggs");
+  registry.clear();
+  const second = registry.resolve("a.eggs");
+
+  releases[0]();
+  assert.deepEqual(await first, { call: 0 });
+  assert.equal(registry.stats().entries, 0);
+
+  const third = registry.resolve("a.eggs");
+  assert.equal(calls, 2, "the third lookup must join the post-clear request");
+  releases[1]();
+  assert.deepEqual(await Promise.all([second, third]), [{ call: 1 }, { call: 1 }]);
+});
+
 test("400 and 404 are answers, and are cached like one", async () => {
   for (const status of [400, 404]) {
     const { impl, calls } = stub(() => ({ status }));
