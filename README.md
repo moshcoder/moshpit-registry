@@ -52,7 +52,14 @@ moshpit-registry pins <name> [kind]   the keys a name may present (tls | mtp)
 moshpit-registry tlds                 every ending claimed
 
 --registry URL    a self-hosted pit
+--timeout MS      request deadline in milliseconds (default: 8000)
 --json            raw JSON instead of a summary
+```
+
+The timeout applies to any registry request, including a self-hosted pit:
+
+```sh
+moshpit-registry resolve blue.eggs --registry http://127.0.0.1:8787 --timeout 2000
 ```
 
 ```
