@@ -47,7 +47,7 @@ and the second is how a namespace gets quietly defeated.
 ## CLI
 
 ```sh
-moshpit-registry resolve <name>       where a name points, and who holds it
+moshpit-registry resolve <name...>    where names point, and who holds them
 moshpit-registry pins <name> [kind]   the keys a name may present (tls | mtp)
 moshpit-registry tlds                 every ending claimed
 
@@ -60,6 +60,15 @@ The timeout applies to any registry request, including a self-hosted pit:
 
 ```sh
 moshpit-registry resolve blue.eggs --registry http://127.0.0.1:8787 --timeout 2000
+```
+
+Pass more than one name to resolve a batch in one process. Requests run
+concurrently, normalized duplicates share the client's in-flight lookup, and
+results stay in input order. With `--json`, multiple names produce an array of
+`{ name, result }` records; the existing single-name JSON shape is unchanged.
+
+```sh
+moshpit-registry resolve blue.eggs red.eggs missing.eggs --json
 ```
 
 ```
