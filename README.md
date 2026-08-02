@@ -56,6 +56,10 @@ moshpit-registry tlds                 every ending claimed
 --json            raw JSON instead of a summary
 ```
 
+The optional `pins` kind is case-insensitive and must be `tls` or `mtp`.
+Unsupported kinds are rejected before contacting the registry; with `--json`,
+the validation failure is returned as JSON.
+
 The timeout applies to any registry request, including a self-hosted pit:
 
 ```sh
