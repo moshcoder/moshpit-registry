@@ -76,6 +76,52 @@ test("CLI timeout aborts a slow self-hosted registry request", async (t) => {
   assert.ok(elapsed < 2000, `configured timeout took ${elapsed}ms`);
 });
 
+test("pins rejects unsupported kinds before requesting and normalizes supported kinds", async (t) => {
+  const requests = [];
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://127.0.0.1");
+    requests.push(url);
+    const kind = url.searchParams.get("kind");
+    const pin = `${kind}-pin`;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ pins: [pin], entries: [{ kind, pin }] }));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const registry = `http://127.0.0.1:${server.address().port}`;
+
+  const invalid = await runAsync([
+    "pins", "blue.eggs", "SSH", "--registry", registry, "--json",
+  ]);
+  assert.equal(invalid.status, 1);
+  assert.equal(invalid.signal, null);
+  assert.equal(invalid.stderr, "");
+  assert.deepEqual(JSON.parse(invalid.stdout), {
+    error: "unsupported pin kind \"SSH\" (expected tls or mtp)",
+  });
+  assert.equal(requests.length, 0, "an unsupported kind must fail before any registry request");
+
+  for (const [input, expected] of [["TLS", "tls"], ["mTp", "mtp"]]) {
+    const result = await runAsync([
+      "pins", "Blue.Eggs", input, "--registry", registry, "--json",
+    ]);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(result.stdout), {
+      pins: [`${expected}-pin`],
+      entries: [{ kind: expected, pin: `${expected}-pin` }],
+    });
+    const url = requests.at(-1);
+    assert.equal(url.searchParams.get("name"), "blue.eggs");
+    assert.equal(url.searchParams.get("kind"), expected);
+  }
+  assert.equal(requests.length, 2);
+});
+
 test("resolve accepts multiple names and preserves single-name JSON", async (t) => {
   const requests = [];
   const server = createServer((req, res) => {

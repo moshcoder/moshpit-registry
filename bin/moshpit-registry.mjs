@@ -21,6 +21,7 @@ const args = process.argv.slice(2);
 const [sub, ...rest] = args;
 const flag = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const valueFlags = new Set(["--registry", "--timeout"]);
+const pinKinds = new Set(["tls", "mtp"]);
 const positional = rest.filter((a, i) => !a.startsWith("--") && !valueFlags.has(rest[i - 1]));
 
 if (!sub || sub === "help" || sub === "--help") { console.log(USAGE); process.exit(sub ? 0 : 1); }
@@ -87,7 +88,14 @@ if (sub === "resolve") {
 }
 
 if (sub === "pins") {
-  const kind = positional[1] || null;
+  const requestedKind = positional[1] || null;
+  const kind = requestedKind ? requestedKind.toLowerCase() : null;
+  if (kind && !pinKinds.has(kind)) {
+    const error = `unsupported pin kind "${requestedKind}" (expected tls or mtp)`;
+    if (raw) console.log(JSON.stringify({ error }, null, 2));
+    else console.error(`moshpit-registry: ${error}`);
+    process.exit(1);
+  }
   const p = await registry.pins(name, kind);
   if (!p) { console.log(`${name} — no key published${kind ? ` for ${kind}` : ""}`); process.exit(1); }
   if (raw) { console.log(JSON.stringify(p, null, 2)); process.exit(0); }
