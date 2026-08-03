@@ -164,3 +164,34 @@ test("the cache does not grow without bound", async () => {
   for (let i = 0; i < 10; i++) await r.resolve(`n${i}.eggs`);
   assert.ok(r.stats().entries <= 3);
 });
+
+test("maxEntries 0 disables caching between sequential lookups", async () => {
+  const { impl, calls } = stub((url, call) => ({
+    status: 200,
+    body: { registered: true, call },
+  }));
+  const r = createRegistry({ fetchImpl: impl, maxEntries: 0 });
+
+  assert.deepEqual(await r.resolve("a.eggs"), { registered: true, call: 1 });
+  assert.deepEqual(await r.resolve("a.eggs"), { registered: true, call: 2 });
+  assert.equal(calls(), 2, "a completed lookup must not survive in the cache");
+  assert.equal(r.stats().entries, 0);
+});
+
+test("maxEntries 0 still coalesces simultaneous lookups", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let calls = 0;
+  const impl = async () => {
+    calls++;
+    await gate;
+    return { ok: true, status: 200, json: async () => ({ registered: true }) };
+  };
+  const r = createRegistry({ fetchImpl: impl, maxEntries: 0 });
+
+  const both = Promise.all([r.resolve("a.eggs"), r.resolve("a.eggs")]);
+  release();
+  assert.deepEqual(await both, [{ registered: true }, { registered: true }]);
+  assert.equal(calls, 1, "simultaneous lookups must still share the in-flight request");
+  assert.equal(r.stats().entries, 0);
+});
