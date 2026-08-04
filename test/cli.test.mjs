@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_CONCURRENCY } from "../lib/index.mjs";
 
 const BIN = fileURLToPath(new URL("../bin/moshpit-registry.mjs", import.meta.url));
 
@@ -30,6 +31,18 @@ test("CLI rejects invalid timeout values before making a request", () => {
 
     assert.equal(result.status, 1, value);
     assert.match(result.stderr, /--timeout must be a positive integer in milliseconds/, value);
+    assert.equal(result.stdout, "", value);
+  }
+});
+
+test("CLI rejects invalid concurrency values before making a request", () => {
+  for (const value of [undefined, "0", "-1", "1.5", "1e3", "nope", "--json"]) {
+    const args = ["resolve", "blue.eggs", "--concurrency"];
+    if (value !== undefined) args.push(value);
+    const result = run(args);
+
+    assert.equal(result.status, 1, value);
+    assert.match(result.stderr, /--concurrency must be a positive integer/, value);
     assert.equal(result.stdout, "", value);
   }
 });
@@ -221,4 +234,64 @@ test("multi-name human output keeps input order", async (t) => {
   assert.ok(result.stdout.indexOf("first.eggs") < result.stdout.indexOf("second.eggs"));
   assert.match(result.stdout, /first\.eggs[\s\S]*points at\s+203\.0\.113\.1/);
   assert.match(result.stdout, /second\.eggs[\s\S]*points at\s+203\.0\.113\.2/);
+});
+
+test("batch resolve respects the configured concurrency and preserves order", async (t) => {
+  let active = 0;
+  let maxActive = 0;
+  const server = createServer((req, res) => {
+    const name = new URL(req.url, "http://127.0.0.1").searchParams.get("name");
+    active++;
+    maxActive = Math.max(maxActive, active);
+    setTimeout(() => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        name,
+        registered: true,
+        name_registered: true,
+        target: `${name}.target`,
+      }));
+      active--;
+    }, 40);
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const names = Array.from({ length: 6 }, (_, index) => `name-${index}.eggs`);
+  const result = await runAsync([
+    "resolve", ...names,
+    "--registry", `http://127.0.0.1:${server.address().port}`,
+    "--concurrency", "2",
+    "--json",
+  ]);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(result.stderr, "");
+  assert.ok(maxActive > 1, `expected parallel requests, saw ${maxActive}`);
+  assert.ok(maxActive <= 2, `concurrency limit exceeded: ${maxActive}`);
+  assert.deepEqual(JSON.parse(result.stdout).map(({ name }) => name), names);
+
+  active = 0;
+  maxActive = 0;
+  const defaultNames = Array.from(
+    { length: DEFAULT_CONCURRENCY + 4 },
+    (_, index) => `default-${index}.eggs`,
+  );
+  const defaults = await runAsync([
+    "resolve", ...defaultNames,
+    "--registry", `http://127.0.0.1:${server.address().port}`,
+    "--json",
+  ]);
+
+  assert.equal(defaults.status, 0, defaults.stderr || defaults.stdout);
+  assert.equal(DEFAULT_CONCURRENCY, 8);
+  assert.ok(maxActive > 1, `expected parallel requests, saw ${maxActive}`);
+  assert.ok(
+    maxActive <= DEFAULT_CONCURRENCY,
+    `default concurrency limit exceeded: ${maxActive}`,
+  );
+  assert.deepEqual(JSON.parse(defaults.stdout).map(({ name }) => name), defaultNames);
 });
