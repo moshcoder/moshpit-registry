@@ -135,6 +135,88 @@ test("pins rejects unsupported kinds before requesting and normalizes supported 
   assert.equal(requests.length, 2);
 });
 
+test("pins accepts multiple names and preserves ordered results", async (t) => {
+  const requests = [];
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, "http://127.0.0.1");
+    const name = url.searchParams.get("name");
+    const kind = url.searchParams.get("kind");
+    requests.push({ name, kind });
+    res.setHeader("content-type", "application/json");
+    if (name === "missing.eggs") {
+      res.end(JSON.stringify({ pins: [], entries: [] }));
+      return;
+    }
+    const pin = `${name}-${kind}-pin`;
+    res.end(JSON.stringify({ pins: [pin], entries: [{ kind, pin }] }));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const registry = `http://127.0.0.1:${server.address().port}`;
+
+  const result = await runAsync([
+    "pins", "Blue.Eggs.", "missing.eggs", "blue.eggs",
+    "--kind", "TLS", "--registry", registry, "--concurrency", "2", "--json",
+  ]);
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.equal(result.stderr, "");
+  const blue = {
+    pins: ["blue.eggs-tls-pin"],
+    entries: [{ kind: "tls", pin: "blue.eggs-tls-pin" }],
+  };
+  assert.deepEqual(JSON.parse(result.stdout), [
+    { name: "Blue.Eggs.", result: blue },
+    { name: "missing.eggs", result: null },
+    { name: "blue.eggs", result: blue },
+  ]);
+  assert.deepEqual(requests.map(({ name }) => name).sort(), ["blue.eggs", "missing.eggs"]);
+  assert.ok(requests.every(({ kind }) => kind === "tls"));
+
+  const human = await runAsync([
+    "pins", "first.eggs", "second.eggs", "--kind", "mtp",
+    "--registry", registry,
+  ]);
+  assert.equal(human.status, 0, human.stderr || human.stdout);
+  assert.equal(human.stderr, "");
+  assert.equal(
+    human.stdout,
+    "first.eggs\n"
+      + "  mtp  first.eggs-mtp-pin\n\n"
+      + "second.eggs\n"
+      + "  mtp  second.eggs-mtp-pin\n",
+  );
+});
+
+test("pins rejects an unsupported --kind before requesting", async (t) => {
+  let requests = 0;
+  const server = createServer((_req, res) => {
+    requests += 1;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ pins: ["unexpected"] }));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const result = await runAsync([
+    "pins", "blue.eggs", "red.eggs", "--kind", "SSH",
+    "--registry", `http://127.0.0.1:${server.address().port}`, "--json",
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr, "");
+  assert.deepEqual(JSON.parse(result.stdout), {
+    error: "unsupported pin kind \"SSH\" (expected tls or mtp)",
+  });
+  assert.equal(requests, 0);
+});
+
 test("resolve accepts multiple names and preserves single-name JSON", async (t) => {
   const requests = [];
   const server = createServer((req, res) => {
