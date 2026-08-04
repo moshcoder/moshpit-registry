@@ -48,18 +48,22 @@ and the second is how a namespace gets quietly defeated.
 
 ```sh
 moshpit-registry resolve <name...>    where names point, and who holds them
-moshpit-registry pins <name> [kind]   the keys a name may present (tls | mtp)
+moshpit-registry pins <name...> [--kind tls|mtp]
+                                      the keys names may present
 moshpit-registry tlds                 every ending claimed
 
 --registry URL    a self-hosted pit
 --timeout MS      request deadline in milliseconds (default: 8000)
 --concurrency N   maximum simultaneous batch lookups (default: 8)
+--kind KIND       limit pins to tls or mtp
 --json            raw JSON instead of a summary
 ```
 
-The optional `pins` kind is case-insensitive and must be `tls` or `mtp`.
-Unsupported kinds are rejected before contacting the registry; with `--json`,
-the validation failure is returned as JSON.
+The optional `pins` kind is case-insensitive and must be `tls` or `mtp`. The
+existing positional form remains available for one name (`pins blue.eggs tls`);
+use `--kind` when inspecting a batch. Unsupported kinds are rejected before
+contacting the registry; with `--json`, the validation failure is returned as
+JSON.
 
 The timeout applies to any registry request, including a self-hosted pit:
 
@@ -77,6 +81,15 @@ shape is unchanged.
 ```sh
 moshpit-registry resolve blue.eggs red.eggs missing.eggs --json
 moshpit-registry resolve one.eggs two.eggs three.eggs --concurrency 2
+```
+
+`pins` accepts the same bounded batch workflow. Multiple names produce an
+ordered array of `{ name, result }` records in JSON, while the established
+single-name JSON shape stays unchanged. A missing pin makes the batch exit
+non-zero without discarding the other answers.
+
+```sh
+moshpit-registry pins blue.eggs red.eggs --kind tls --json
 ```
 
 ```

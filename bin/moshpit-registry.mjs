@@ -15,18 +15,20 @@ import {
 const USAGE = `moshpit-registry — ask the Moshpit registry
 
   moshpit-registry resolve <name...>     where names point, and who holds them
-  moshpit-registry pins <name> [kind]    the keys a name may present (tls | mtp)
+  moshpit-registry pins <name...> [--kind tls|mtp]
+                                         the keys names may present
   moshpit-registry tlds                  every ending claimed
 
   --registry URL    a self-hosted pit (default: ${DEFAULT_REGISTRY_BASE})
   --timeout MS      request deadline in milliseconds (default: ${DEFAULT_TIMEOUT_MS})
   --concurrency N   maximum simultaneous batch lookups (default: ${DEFAULT_CONCURRENCY})
+  --kind KIND       limit pins to tls or mtp
   --json            raw JSON instead of a summary`;
 
 const args = process.argv.slice(2);
 const [sub, ...rest] = args;
 const flag = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
-const valueFlags = new Set(["--registry", "--timeout", "--concurrency"]);
+const valueFlags = new Set(["--registry", "--timeout", "--concurrency", "--kind"]);
 const pinKinds = new Set(["tls", "mtp"]);
 const positional = rest.filter((a, i) => !a.startsWith("--") && !valueFlags.has(rest[i - 1]));
 
@@ -125,22 +127,50 @@ if (sub === "resolve") {
 }
 
 if (sub === "pins") {
-  const requestedKind = positional[1] || null;
+  const hasKindFlag = args.includes("--kind");
+  const trailing = positional.at(-1);
+  const legacyKind = !hasKindFlag
+    && positional.length > 1
+    && (pinKinds.has(trailing.toLowerCase()) || !trailing.includes("."))
+    ? trailing
+    : null;
+  const requestedKind = hasKindFlag ? flag("kind", null) : legacyKind;
   const kind = requestedKind ? requestedKind.toLowerCase() : null;
-  if (kind && !pinKinds.has(kind)) {
-    const error = `unsupported pin kind "${requestedKind}" (expected tls or mtp)`;
+  if ((hasKindFlag && !requestedKind) || (kind && !pinKinds.has(kind))) {
+    const error = `unsupported pin kind "${requestedKind ?? ""}" (expected tls or mtp)`;
     if (raw) console.log(JSON.stringify({ error }, null, 2));
     else console.error(`moshpit-registry: ${error}`);
     process.exit(1);
   }
-  const p = await registry.pins(name, kind);
-  if (!p) { console.log(`${name} — no key published${kind ? ` for ${kind}` : ""}`); process.exit(1); }
-  if (raw) { console.log(JSON.stringify(p, null, 2)); process.exit(0); }
-  console.log(`${name}`);
-  for (const entry of p.entries || p.pins.map((pin) => ({ pin }))) {
-    console.log(`  ${entry.kind ? entry.kind.padEnd(4) : "    "} ${entry.pin}`);
+
+  const names = legacyKind ? positional.slice(0, -1) : positional;
+  const concurrency = concurrencyValue === null
+    ? DEFAULT_CONCURRENCY
+    : Number(concurrencyValue);
+  const results = await mapWithConcurrency(names, concurrency, async (requested) => ({
+    name: requested,
+    result: await registry.pins(requested, kind),
+  }));
+
+  if (results.length === 1 && !results[0].result) {
+    console.log(`${results[0].name} — no key published${kind ? ` for ${kind}` : ""}`);
+    process.exit(1);
   }
-  process.exit(0);
+
+  if (raw) {
+    console.log(JSON.stringify(results.length === 1 ? results[0].result : results, null, 2));
+  } else {
+    const sections = results.map(({ name: requested, result }) => {
+      if (!result) return `${requested} — no key published${kind ? ` for ${kind}` : ""}`;
+      const lines = [requested];
+      for (const entry of result.entries || result.pins.map((pin) => ({ pin }))) {
+        lines.push(`  ${entry.kind ? entry.kind.padEnd(4) : "    "} ${entry.pin}`);
+      }
+      return lines.join("\n");
+    });
+    console.log(sections.join("\n\n"));
+  }
+  process.exit(results.some(({ result }) => !result) ? 1 : 0);
 }
 
 console.error(`unknown: ${sub}\n\n${USAGE}`);
