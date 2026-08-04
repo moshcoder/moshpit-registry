@@ -53,6 +53,7 @@ moshpit-registry tlds                 every ending claimed
 
 --registry URL    a self-hosted pit
 --timeout MS      request deadline in milliseconds (default: 8000)
+--concurrency N   maximum simultaneous batch lookups (default: 8)
 --json            raw JSON instead of a summary
 ```
 
@@ -66,13 +67,16 @@ The timeout applies to any registry request, including a self-hosted pit:
 moshpit-registry resolve blue.eggs --registry http://127.0.0.1:8787 --timeout 2000
 ```
 
-Pass more than one name to resolve a batch in one process. Requests run
-concurrently, normalized duplicates share the client's in-flight lookup, and
-results stay in input order. With `--json`, multiple names produce an array of
-`{ name, result }` records; the existing single-name JSON shape is unchanged.
+Pass more than one name to resolve a batch in one process. Requests run with a
+default concurrency limit of 8, normalized duplicates share the client's
+in-flight lookup, and results stay in input order. Use `--concurrency` to tune
+the limit for a small self-hosted registry. With `--json`, multiple names
+produce an array of `{ name, result }` records; the existing single-name JSON
+shape is unchanged.
 
 ```sh
 moshpit-registry resolve blue.eggs red.eggs missing.eggs --json
+moshpit-registry resolve one.eggs two.eggs three.eggs --concurrency 2
 ```
 
 ```

@@ -5,7 +5,12 @@
 // with a shell in front, for when the question is "what does the registry
 // actually say" rather than "what did something do with the answer".
 
-import { createRegistry, DEFAULT_REGISTRY_BASE, DEFAULT_TIMEOUT_MS } from "../lib/index.mjs";
+import {
+  createRegistry,
+  DEFAULT_CONCURRENCY,
+  DEFAULT_REGISTRY_BASE,
+  DEFAULT_TIMEOUT_MS,
+} from "../lib/index.mjs";
 
 const USAGE = `moshpit-registry — ask the Moshpit registry
 
@@ -15,12 +20,13 @@ const USAGE = `moshpit-registry — ask the Moshpit registry
 
   --registry URL    a self-hosted pit (default: ${DEFAULT_REGISTRY_BASE})
   --timeout MS      request deadline in milliseconds (default: ${DEFAULT_TIMEOUT_MS})
+  --concurrency N   maximum simultaneous batch lookups (default: ${DEFAULT_CONCURRENCY})
   --json            raw JSON instead of a summary`;
 
 const args = process.argv.slice(2);
 const [sub, ...rest] = args;
 const flag = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
-const valueFlags = new Set(["--registry", "--timeout"]);
+const valueFlags = new Set(["--registry", "--timeout", "--concurrency"]);
 const pinKinds = new Set(["tls", "mtp"]);
 const positional = rest.filter((a, i) => !a.startsWith("--") && !valueFlags.has(rest[i - 1]));
 
@@ -34,6 +40,34 @@ if (args.includes("--timeout") && (
 )) {
   console.error("moshpit-registry: --timeout must be a positive integer in milliseconds");
   process.exit(1);
+}
+
+const concurrencyValue = flag("concurrency", null);
+if (args.includes("--concurrency") && (
+  !/^\d+$/.test(String(concurrencyValue ?? ""))
+  || !Number.isSafeInteger(Number(concurrencyValue))
+  || Number(concurrencyValue) < 1
+)) {
+  console.error("moshpit-registry: --concurrency must be a positive integer");
+  process.exit(1);
+}
+
+async function mapWithConcurrency(values, limit, mapper) {
+  const results = new Array(values.length);
+  let next = 0;
+
+  async function worker() {
+    while (next < values.length) {
+      const index = next++;
+      results[index] = await mapper(values[index], index);
+    }
+  }
+
+  await Promise.all(Array.from(
+    { length: Math.min(limit, values.length) },
+    () => worker(),
+  ));
+  return results;
 }
 
 const registry = createRegistry({
@@ -52,10 +86,13 @@ const name = positional[0];
 if (!name) { console.error(`usage: moshpit-registry ${sub} <name>`); process.exit(1); }
 
 if (sub === "resolve") {
-  const results = await Promise.all(positional.map(async (requested) => ({
+  const concurrency = concurrencyValue === null
+    ? DEFAULT_CONCURRENCY
+    : Number(concurrencyValue);
+  const results = await mapWithConcurrency(positional, concurrency, async (requested) => ({
     name: requested,
     result: await registry.resolve(requested),
-  })));
+  }));
 
   // Preserve the established single-name failure text as well as its success
   // shape. Structured per-name nulls are only part of the new batch format.
