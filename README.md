@@ -47,10 +47,10 @@ and the second is how a namespace gets quietly defeated.
 ## CLI
 
 ```sh
-moshpit-registry resolve <name...>    where names point, and who holds them
-moshpit-registry pins <name...> [--kind tls|mtp]
-                                      the keys names may present
-moshpit-registry tlds                 every ending claimed
+moshpit-registry resolve (<name...> | -)   where names point; - reads stdin
+moshpit-registry pins (<name...> | -) [--kind tls|mtp]
+                                          the keys names may present
+moshpit-registry tlds                     every ending claimed
 
 --registry URL    a self-hosted pit
 --timeout MS      request deadline in milliseconds (default: 8000)
@@ -90,6 +90,20 @@ non-zero without discarding the other answers.
 
 ```sh
 moshpit-registry pins blue.eggs red.eggs --kind tls --json
+```
+
+Use `-` as the only name to read up to 1,000 non-empty names from stdin. This
+works for both commands, keeps input order, and still uses the configured
+concurrency bound (up to 64 workers). Input is also capped at 1 MiB. Stdin JSON
+always uses the batch array, including a one-line stream, so pipelines receive
+a stable shape. Empty, oversized, mixed `-`/name, or control-character input
+fails before contacting the registry.
+
+```sh
+printf 'blue.eggs\nred.eggs\n' | moshpit-registry resolve - --json
+cat names.txt | moshpit-registry pins - --kind tls --concurrency 4 --json
+# The legacy kind form works too:
+cat names.txt | moshpit-registry pins - tls --json
 ```
 
 ```
